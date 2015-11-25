@@ -647,6 +647,8 @@ sub _parse_styles {
     my @format = map {
         my $alignment  = $_->first_child('alignment');
         my $protection = $_->first_child('protection');
+
+        no warnings 'uninitialized';
         Spreadsheet::ParseExcel::Format->new(
             IgnoreFont         => !$self->_xml_boolean($_->att('applyFont')),
             IgnoreFill         => !$self->_xml_boolean($_->att('applyFill')),
@@ -714,6 +716,7 @@ sub _extract_files {
     my $wb_name = ($rels->find_nodes(
         qq<//Relationship[\@Type="$type_base/officeDocument"]>
     ))[0]->att('Target');
+    $wb_name =~ s|^/||;
     my $wb_xml = $self->_parse_xml($zip, $wb_name);
 
     my $path_base = $self->_base_path_for($wb_name);
@@ -723,24 +726,24 @@ sub _extract_files {
     );
 
     my ($strings_xml) = map {
-        $zip->memberNamed($path_base . $_->att('Target'))->contents
+        $zip->memberNamed( $self->_fix_path( $path_base, $_->att('Target') ) )->contents
     } $wb_rels->find_nodes(qq<//Relationship[\@Type="$type_base/sharedStrings"]>);
 
     my $styles_xml = $self->_parse_xml(
         $zip,
-        $path_base . ($wb_rels->find_nodes(
+        $self->_fix_path( $path_base, ($wb_rels->find_nodes(
             qq<//Relationship[\@Type="$type_base/styles"]>
-        ))[0]->att('Target')
+        ))[0]->att('Target'))
     );
 
     my %worksheet_xml = map {
-        if ( my $sheetfile = $zip->memberNamed($path_base . $_->att('Target'))->contents ) {
+        if ( my $sheetfile = $zip->memberNamed( $self->_fix_path( $path_base, $_->att('Target') ) )->contents ) {
             ( $_->att('Id') => $sheetfile );
         }
     } $wb_rels->find_nodes(qq<//Relationship[\@Type="$type_base/worksheet"]>);
 
     my %themes_xml = map {
-        $_->att('Id') => $self->_parse_xml($zip, $path_base . $_->att('Target'))
+        $_->att('Id') => $self->_parse_xml($zip, $self->_fix_path( $path_base, $_->att('Target') ) )
     } $wb_rels->find_nodes(qq<//Relationship[\@Type="$type_base/theme"]>);
 
     return {
@@ -752,6 +755,12 @@ sub _extract_files {
             ? (strings => $strings_xml)
             : ()),
     };
+}
+
+sub _fix_path {
+    my $self = shift;
+    my ($base, $path) = @_;
+    return ( $path =~ s|^/|| ) ? $path : $base . $path;
 }
 
 sub _parse_xml {
